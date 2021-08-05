@@ -3,7 +3,7 @@
 
 Topology Automated Force-Field Interactions (TAFFI) is a framework for parameterizing transferable force-fields to quantum chemistry data. Here we are distributing force-field parameters for TAFFI-gen, a fixed charge, harmonic force field fit to wB97X-D3/def2-TZVP data with coverage for small organic molecules. The current distribution provides the TAFFI-gen force-field parameters used for the simulations reported [here](https://doi.org/10.26434/chemrxiv.14527299.v1). 
 
-# What's Included
+## What's Included
 
 The included scripts are provided as stand-alone python programs that only provide atomtyping and force-field assignment capability, not the full TAFFI functionality required for extending the force-field or parameterizing alternative functional forms.
 
@@ -19,13 +19,15 @@ The included scripts are provided as stand-alone python programs that only provi
 
 * `OKKJLVBELUTLKV-UHFFFAOYSA-N`: this folder contains quantum chemistry training data for the methanol model compound. This is included here as an example of the training data for interested readers of the TAFFI-gen reference. A full description of model compound and training data generation are supplied there.
 
+## Usage
+
 ### Dependencies
 
 * Python 3
 * numpy
 * openbabel 2.3.2 and above
 
-### Usage
+### Commands
 
 * To create lammps input files using your xyz, run
 ```
