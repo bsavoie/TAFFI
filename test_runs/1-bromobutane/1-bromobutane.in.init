@@ -1,0 +1,132 @@
+# lammps input file for polymer simulation with dilute ions
+
+# VARIABLES
+variable        data_name       index   1-bromobutane.data
+variable        settings_name   index   1-bromobutane.in.settings
+variable        log_name        index   1-bromobutane.log
+variable        nSteps_ramp     index   1000000 # number of data steps for the ramped anneal
+variable        nSteps_equil    index   2000000 # number of data steps for the ramped anneal
+variable        avg_freq        index   1000
+variable        coords_freq     index   1000
+variable        thermo_freq     index   1000
+variable        dump4avg        index   100
+variable        vseed           index   31863 
+variable        ANNEAL_TEMP     index   10.0 # Temperature during the initial anneal
+variable        FINAL_TEMP      index   298.0 # Temperature ramped to during the final anneal
+variable        pressure        index   1.0 # Pressure during the simulations
+
+# Change the name of the log output #
+log ${log_name}
+
+#===========================================================
+# GENERAL PROCEDURES
+#===========================================================
+units		real	# g/mol, angstroms, fs, kcal/mol, K, atm, charge*angstrom
+dimension	3	    # 3 dimensional simulation
+newton		on	    # use Newton's 3rd law
+boundary	p p p	# periodic boundary conditions 
+atom_style	full    # molecular + charge
+
+#===========================================================
+# FORCE FIELD DEFINITION
+#===========================================================
+special_bonds  lj   0.0 0.0 0.0  coul 0.0 0.0 0.0     # NO     1-4 LJ/COUL interactions
+pair_style     hybrid lj/cut/coul/long 14.0 14.0      # outer_LJ outer_Coul (cutoff values, see LAMMPS Doc)
+kspace_style   pppm 0.0001                            # long-range electrostatics sum method
+bond_style     harmonic                               # parameters needed: k_bond, r0
+angle_style    harmonic                               # parameters needed: k_theta, theta0
+dihedral_style hybrid opls                            # parameters needed: V1, V2, V3, V4
+pair_modify    tail yes mix arithmetic                # using Waldman-Hagler mixing rules
+
+#===========================================================
+# SETUP SIMULATIONS
+#===========================================================
+
+# READ IN COEFFICIENTS/COORDINATES/TOPOLOGY
+read_data ${data_name}
+include ${settings_name}
+
+# SET RUN PARAMETERS
+timestep	1.0		# fs
+run_style	verlet 		# Velocity-Verlet integrator
+neigh_modify every 1 delay 0 check no one 10000 # More relaxed rebuild criteria can be used
+
+#===========================================================
+# RUN CONSTRAINED RELAXATION
+#===========================================================
+
+# SET OUTPUTS
+thermo_style    custom step temp vol density etotal pe ebond eangle edihed ecoul elong evdwl enthalpy press
+thermo_modify   format float %20.10f
+thermo ${thermo_freq}
+
+# DECLARE RELEVANT OUTPUT VARIABLES
+variable        my_step equal   step
+variable        my_temp equal   temp
+variable        my_rho  equal   density
+variable        my_pe   equal   pe
+variable        my_ebon equal   ebond
+variable        my_eang equal   eangle
+variable        my_edih equal   edihed
+variable        my_evdw equal   evdwl
+variable        my_eel  equal   (ecoul+elong)
+variable        my_ent  equal   enthalpy
+variable        my_P    equal   press
+variable        my_vol  equal   vol
+
+fix  averages all ave/time ${dump4avg} $(v_avg_freq/v_dump4avg) ${avg_freq} v_my_temp v_my_rho v_my_vol v_my_pe v_my_edih v_my_evdw v_my_eel v_my_ent v_my_P file thermo.avg
+
+# INITIALIZE VELOCITIES AND CREATE THE CONSTRAINED RELAXATION FIX
+velocity        all create ${ANNEAL_TEMP} ${vseed} mom yes rot yes     # DRAW VELOCITIES
+
+fix relax all nve/limit 0.01
+run             10000
+unfix relax
+
+#===========================================================
+# RUN RAMPED ANNEAL
+#===========================================================
+
+# REINITIALIZE THE VELOCITIES AND CREATE THE ANNEALING FIX
+velocity        all create ${ANNEAL_TEMP} ${vseed} mom yes rot yes     # DRAW VELOCITIES
+
+fix mom all momentum 1000 linear 1 1 1 angular # Zero out system linear and angular momentum every ps 
+fix anneal all npt temp ${ANNEAL_TEMP} ${FINAL_TEMP} 100.0 iso ${pressure} ${pressure} 1000.0 # NPT, nose-hoover 100 fs T relaxation
+
+# CREATE COORDINATE DUMPS FOR ANNEAL
+dump anneal all custom ${coords_freq} anneal.lammpstrj id type x y z
+dump_modify anneal sort id format float %20.10g
+
+# RUN RAMPED ANNEAL
+run ${nSteps_ramp}
+unfix anneal
+
+# RUN EQUILIBRATION PHASE AT FINAL TEMP
+fix anneal all npt temp ${FINAL_TEMP} ${FINAL_TEMP} 100.0 iso ${pressure} ${pressure} 1000.0 # NPT, nose-hoover 100 fs T relaxation
+run ${nSteps_ramp}
+unfix anneal
+undump anneal
+
+# RETURN TO LESS FREQUENT NEIGHBOR BUILDS
+neigh_modify every 1 delay 10 check yes one 10000 # More relaxed rebuild criteria can be used
+
+#===========================================================
+# RUN EQUILIBRIUM SIM
+#===========================================================
+
+# UPDATE RUN PARAMETERS AND CREATE FIX
+fix equil all npt temp ${FINAL_TEMP} ${FINAL_TEMP} 100.0 iso ${pressure} ${pressure} 1000.0 # NPT, nose-hoover 100 fs T relaxation
+
+# CREATE COORDINATE DUMPS FOR EQUILIBRIUM
+dump equil all custom ${coords_freq} equil.lammpstrj id type x y z
+dump_modify equil sort id format float %20.10g
+
+# RUN EQUIL
+run		${nSteps_equil}
+unfix equil
+undump equil
+
+# WRITE RESTART FILES, CLEANUP, AND EXIT
+write_restart   1-bromobutane.end.restart
+write_data      1-bromobutane.end.data pair ii
+unfix		   averages

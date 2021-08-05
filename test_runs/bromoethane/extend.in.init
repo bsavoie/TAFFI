@@ -1,0 +1,98 @@
+# lammps input file for insertion trajectory
+
+# VARIABLES
+log extend.log
+variable    data_name       index   bromoethane.end.data
+variable    restart_name    index   extend.end.restart
+variable    settings_name   index   bromoethane.in.settings
+variable    n_equil         index   2000000	  # number of data steps equilibration segment
+variable    coords_freq     index   1000 # the frequency that coordinates are prints
+variable    thermo_freq     index   1000 # the frequency that instantaneous thermodynamic variables are printed to output.
+variable    avg_freq        index   1000 # the frequency that the thermodynamics averages are printed (to file)
+variable    avg_spacing     index   1    # the spacing of snapshots used for average values calculations (printed to file)
+variable    Temp            index   298.0
+variable    pressure        index   1.0 # Pressure during the simulations
+variable    run             index   0
+
+#===========================================================
+# GENERAL PROCEDURES
+#===========================================================
+units		real	# g/mol, angstroms, fs, kcal/mol, K, atm, charge*angstrom
+dimension	3	# 3 dimensional simulation
+newton		on	# use Newton's 3rd law
+boundary	p p p	# periodic boundary conditions 
+atom_style	full    # molecular + charge
+
+#===========================================================
+# FORCE FIELD DEFINITION
+#===========================================================
+special_bonds  lj   0.0 0.0 0.0  coul 0.0 0.0 0.0     # NO     1-4 LJ/COUL interactions
+pair_style     hybrid lj/cut/coul/long 14.0 14.0 # outer_LJ outer_Coul (cutoff values, see LAMMPS Doc)
+kspace_style   pppm 0.0001          # long-range electrostatics sum method
+bond_style     harmonic             # parameters needed: k_bond, r0
+angle_style    harmonic             # parameters needed: k_theta, theta0
+dihedral_style hybrid opls            # parameters needed: V1, V2, V3, V4
+pair_modify    tail yes mix arithmetic       # using Lorenz-Berthelot mixing rules
+
+#===========================================================
+# SETUP SIMULATIONS
+#===========================================================
+
+# READ IN COEFFICIENTS/COORDINATES/TOPOLOGY
+if "${run} == 0" then &
+   "read_data ${data_name}" &
+else &
+   "read_restart ${restart_name}"
+include ${settings_name}
+
+# SET RUN PARAMETERS
+timestep	1.0		# fs
+run_style	verlet 		# Velocity-Verlet integrator
+neigh_modify every 1 delay 10 check yes one 10000
+
+# SET OUTPUTS
+thermo_style    custom step temp vol density etotal pe ebond eangle edihed ecoul elong evdwl enthalpy press
+thermo_modify   format float %20.10f
+thermo ${thermo_freq}
+
+# Declare relevant output variables and create averages fix
+variable        my_step equal   step
+variable        my_temp equal   temp
+variable        my_rho  equal   density
+variable        my_pe   equal   pe
+variable        my_ebon equal   ebond
+variable        my_eang equal   eangle
+variable        my_edih equal   edihed
+variable        my_evdw equal   evdwl
+variable        my_eel  equal   (ecoul+elong)
+variable        my_ent  equal   enthalpy
+variable        my_P    equal   press
+variable        my_vol  equal   vol
+fix averages all ave/time ${avg_spacing} $(v_thermo_freq/v_avg_spacing) ${thermo_freq} v_my_temp v_my_rho v_my_vol v_my_pe v_my_edih v_my_evdw v_my_eel v_my_ent v_my_P file ${run}.thermo.avg
+
+#===========================================================
+# RUN EXTENSION
+#===========================================================
+
+# Set npt/nvt fix for the runs
+fix mom all momentum 1000 linear 1 1 1 angular # Zero out system linear and angular momentum every ps 
+fix tmp all npt temp ${Temp} ${Temp} 100.0 iso ${pressure} ${pressure} 1000.0 # NPT, nose-hoover 100 fs T relaxation
+
+# Create coordinate dump
+dump equil all custom ${coords_freq} ${run}.sys.lammpstrj id type x y z
+dump_modify equil sort id format float %20.10g
+
+# Run equilibration segment
+run		${n_equil}
+
+# Write restart files, cleanup, and exit
+write_restart   extend.end.restart
+write_data      extend.end.data pair ii
+
+# Reset dump and increment
+undump equil
+
+# Update run number
+variable sub equal (v_run+1)
+shell sed -i /variable.*run.*index/s/${run}/${sub}/g extend.in.init
+
